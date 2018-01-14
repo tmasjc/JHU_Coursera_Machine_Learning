@@ -1,0 +1,150 @@
+---
+title: "Week 4 Course Project"
+author: "tmasjc"
+date: "15/01/2018"
+output: 
+    html_document:
+        theme: lumen
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+## Background
+
+In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell (total of 4 sensors) of 6 participants to forecast specific ``classe`` of weight lifting exercise. Exercise specification (``classe``) is divided into 5 category, from class A to E.
+
+More information is available from the website [here](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har).
+
+
+## Setup
+
+As for how all data analysis begins, import data.
+
+```{r}
+# load libraries
+library(tidyverse)
+library(caret)
+
+# Set seed for reproducible purpose
+set.seed(8787)
+
+# load data
+training <- read.csv("Data/pml-training.csv", row.names = 1, 
+                     # Blank item is not useful
+                     strip.white = TRUE, na.strings = c("NA", "")) 
+testing <- read.csv("Data/pml-testing.csv", row.names = 1)
+```
+
+## Pre-processing
+
+We proceed to process data for modelling. This section consists of 2 steps. 
+
+
+#### Step 1. Remove Redundant Column 
+
+There are some columns which compose nothing but NA value. We remove them to reduce computational cost. More importantly, certain model is very sensitive to data type (cannot cope with NA). 
+
+```{r}
+# Calculate NAs by column
+count_NA <- apply(training, 2, FUN = function(x) sum(is.na(x)))
+
+table(count_NA)
+
+# Remove useless column
+tr_clean <- training[, which(count_NA == 0)]
+```
+
+<small> Note: There is a reason why there are so many columns with all NAs. Originally, the study uses a sliding window approach (2.5 seconds) for feature extraction. In each step they calculate features on the Euler angles (roll, pitch and yaw), as well as the raw accelerometer, gyroscope and magnetometer readings, generating in total 96 derived feature sets.</small>
+
+#### Step 2: Feature Selection 
+
+Eliminating features that do not carry much information to modelling purposes. Features that only have a single unique value (near zero variance). We do that by measuring features against the following 2 metrics, 
+    
+    - The frequency of the most prevalent value over the second most frequent value
+    - Number of unique values divided by the total number of samples
+
+If the frequency ratio is greater than a pre-specified threshold and the unique value percentage is less than a threshold, we might consider a predictor to be near zero-variance.
+
+Adding more feature also increases our model bias and thus, increases our out-of-sample error. By eliminating insignificant features, we also reduce the chances of overfitting. 
+
+```{r}
+# Save near zero variance to a data frame
+nzv <- nearZeroVar(tr_clean[, 7:length(tr_clean) - 1], saveMetrics = TRUE)
+
+# Count table
+table(nzv$nzv)
+```
+
+It seems like there is no feature we can further reduce.
+
+## Data Splitting
+
+Before we proceed to build our model, lets split our current training samples to 80/20 size (80% for model building, 20% for validation). 20% of data for model validation helps us to forecast out-of-sample error.
+
+```{r}
+# 80/20 split
+trainIndex <- createDataPartition(tr_clean$classe, p = 0.8, list = FALSE, times = 1)
+
+tr_main <- tr_clean[trainIndex, ][, 7:length(tr_clean)]
+tr_valid <- tr_clean[-trainIndex, ]
+```
+
+In summary, we shall have 
+
+     - total `r nrow(training) + nrow(testing) ` rows of data
+        - `r nrow(tr_main) ` rows for model building 
+        - `r nrow(tr_valid) ` rows for model validation
+        - `r nrow(testing) ` rows for testing purpose
+
+## Modelling
+
+We proceed to model our data by deploying ``ranger`` method. A ranger model is very similar to ``random forest`` except it computes much faster. More information can be found [here](https://cran.r-project.org/web/packages/ranger/index.html).
+
+One thing to note here, in our circumstances, countering *False Negative* is not our priority, we explicit tune our model criterion for ``accuracy``. 
+
+In addition, we use repeated cross-validation resampling control to reduce biasness in our model.
+
+<small> *Note: Take another instance, if we are building a model for cancer detection, False Negative becomes extremely important. We might wish to be stricter in our test. We would not want to let a cancer-positive patient thinking he or she is okay!* </small>
+
+```{r, eval = FALSE}
+# Custom control, repeated cross-validation
+control <- trainControl(method = "repeatedcv", number = 10, repeats = 3, classProbs = TRUE)
+
+# Use model `ranger` and build for accuracy
+rf_m <- train(classe ~ ., data = tr_main, method = "ranger", 
+              trControl = control, metric = "Accuracy")
+
+print(rf_m)
+```
+
+
+```{r, echo=FALSE}
+load(file = "random_forest_model.RData")
+print(rf_m)
+```
+
+## Model Testing
+
+We proceed to validate our model performance.
+
+```{r}
+# Make prediction
+pred <- predict(rf_m, newdata = tr_valid)
+
+# How do we do?
+confusionMatrix(tr_valid$classe, pred)
+```
+
+It seems like our model performs quite well. We should expect an above 95% accuracy on our testing data.
+
+
+
+
+
+
+
+
+
+
