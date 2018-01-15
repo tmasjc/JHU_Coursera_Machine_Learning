@@ -1,0 +1,76 @@
+---
+title: "Week 4 Course Project"
+author: "tmasjc"
+date: "14/01/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# load libraries
+library(tidyverse)
+library(caret)
+
+# Set seed for reproducible purpose
+set.seed(8787)
+
+# load data
+training <- read.csv("Data/pml-training.csv", row.names = 1)
+testing <- read.csv("Data/pml-testing.csv", row.names = 1)
+
+# Dimension of data
+dim(training)
+```
+
+## Pre-process Data
+
+```{r}
+# Extract `new_window` variable
+window <- training$new_window
+# Run length encoding 
+window_len <- rle(as.numeric(window))
+# Filter those that are not `1` (`yes`)
+retain <- which(window_len$lengths != 1)
+window_len <- window_len$lengths[retain]
+# Except the fist value, all plus one (add back `yes`)
+window_len[2:length(window_len)] <- sapply(window_len[2:length(window_len)], `+`, y = 1)
+# Check result
+sum(window_len) == nrow(training[-nrow(training), ]) # Last row of training is 'yes'
+```
+
+
+```{r}
+# Remove last row as the new_window indicates 'yes', not useful
+training <- training[-nrow(training), ]
+# Generate vector based on window length
+tag <- rep(1:length(window_len), window_len)
+# Add new column as a group tag
+training <- cbind(window_tag = tag, training)
+```
+
+## Feature Engineering
+
+Calculate the Euler angles of each of the four sensors by eight features: ``mean``, ``variance``, ``standard deviation``, ``max`` and ``min``, generating in total 60 (3 angles \* 4 sensors \* 5 features) derived feature sets.
+
+
+```{r}
+# 
+infos <- list('roll_belt', 'roll_arm')
+
+# Variable names
+whats <- paste0('mean_', infos)
+
+# Methods
+hows <- paste0('mean(', infos, ')')
+
+training %>% group_by(window_tag) %>% 
+    summarise_(.dots = setNames(hows, whats)) %>% 
+    select(window_tag, mean_roll_belt)
+```
+
+
+
+
